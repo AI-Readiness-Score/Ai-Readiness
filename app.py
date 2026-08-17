@@ -7,6 +7,7 @@ checks from scorer.py, and shows a 0-100 score with a breakdown.
 import streamlit as st
 import requests
 from scorer import score_store, CHECKS
+from fix_report import generate_fix_report
 
 st.set_page_config(page_title="AI Readiness Score", page_icon="🛍️", layout="centered")
 
@@ -69,7 +70,16 @@ if st.button("Get my AI-readiness score", type="primary"):
             result, err = analyze(url)
         if err:
             st.error(err)
+            st.session_state.pop("result", None)
         else:
+            # Save so the report unlock below can reuse it after a rerun
+            st.session_state["result"] = result
+            st.session_state["store_url"] = url
+
+# Show results if we have them (persists across button clicks)
+if "result" in st.session_state:
+            result = st.session_state["result"]
+            url = st.session_state["store_url"]
             score = result["score"]
             colour = "🟢" if score >= 70 else ("🟡" if score >= 40 else "🔴")
             st.markdown(f"## {colour} {score}/100")
@@ -91,11 +101,49 @@ if st.button("Get my AI-readiness score", type="primary"):
                 )
 
             st.divider()
-            # ---- paid tier CTA (wire up payment later) ----
-            st.subheader("Want the fixes?")
+            # ---- paid tier: AI-generated fix report ----
+            st.subheader("💡 Want the fixes?")
             st.write(
                 "Get a prioritised, step-by-step action plan showing exactly how "
                 "to raise your score — written for non-technical store owners."
             )
-            st.link_button("Get my fix report →", "https://your-payment-link.example")
-            st.caption("Replace this button with your Stripe/Gumroad link when ready.")
+
+            # PAYMENT GATE (MVP):
+            # For now this is a simple unlock code. When you wire up Gumroad/Stripe,
+            # you'll sell this code (or verify a license) instead of hardcoding it.
+            # Set the real code in Streamlit Secrets as UNLOCK_CODE.
+            expected_code = st.secrets.get("UNLOCK_CODE", "TESTUNLOCK")
+
+            code = st.text_input(
+                "Enter your unlock code (you get this after purchase)",
+                type="password",
+            )
+            if st.button("Generate my fix report"):
+                if code.strip() != expected_code:
+                    st.error("That code isn't right. Purchase to get your unlock code.")
+                elif "ANTHROPIC_API_KEY" not in st.secrets:
+                    st.error(
+                        "App isn't configured with an API key yet. "
+                        "(Owner: add ANTHROPIC_API_KEY to Streamlit Secrets.)"
+                    )
+                else:
+                    with st.spinner("Writing your personalised fix report…"):
+                        try:
+                            report = generate_fix_report(
+                                st.secrets["ANTHROPIC_API_KEY"],
+                                url,
+                                score,
+                                result["breakdown"],
+                            )
+                            st.session_state["report"] = report
+                        except Exception as e:
+                            st.error(f"Something went wrong generating the report: {e}")
+
+            if "report" in st.session_state:
+                st.divider()
+                st.markdown(st.session_state["report"])
+                st.download_button(
+                    "Download report",
+                    st.session_state["report"],
+                    file_name="ai-readiness-fixes.md",
+                )
