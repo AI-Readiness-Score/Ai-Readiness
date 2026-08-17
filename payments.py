@@ -47,6 +47,7 @@ def verify_session(secret_key, session_id):
     """
     stripe.api_key = secret_key
     session = stripe.checkout.Session.retrieve(session_id)
-    paid = session.get("payment_status") == "paid"
-    meta = session.get("metadata") or {}
-    return paid, meta.get("store_url")
+    paid = getattr(session, "payment_status", None) == "paid"
+    meta = getattr(session, "metadata", None) or {}
+    store_url = meta.get("store_url") if hasattr(meta, "get") else None
+    return paid, store_url
